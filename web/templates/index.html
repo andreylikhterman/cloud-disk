@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cloud Drive</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css?v=10">
+</head>
+
+<body>
+    <div class="container">
+
+        <div id="alertContainer"></div>
+
+        <div id="authSection" style="max-width: 450px; margin: 0 auto;">
+            <div class="card">
+                <h2 style="margin-bottom: 24px; font-weight: 600;">Login</h2>
+                <form id="loginForm">
+                    <div class="form-group">
+                        <label for="loginUsername">Username</label>
+                        <input type="text" id="loginUsername" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="loginPassword">Password</label>
+                        <input type="password" id="loginPassword" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Sign In</button>
+                </form>
+                <p style="text-align: center; margin-top: 24px; color: var(--text-secondary); font-size: 0.9rem;">
+                    Don't have an account? <a href="/register"
+                        style="color: var(--accent); text-decoration: none; font-weight: 500;">Create one</a>
+                </p>
+            </div>
+        </div>
+
+        <!-- App Section -->
+        <div id="appSection" class="hidden">
+            <div class="card">
+                <div class="user-info">
+                    <span>Welcome, <span id="currentUser"></span></span>
+                    <button id="logoutBtn" class="btn btn-secondary">Sign Out</button>
+                </div>
+
+                <div class="upload-zone" id="uploadZone">
+                    <div class="upload-icon">↓</div>
+                    <h3>Drop files here</h3>
+                    <p style="color: var(--text-secondary); font-size: 0.9rem;">or click to browse</p>
+                    <input type="file" id="fileInput" class="hidden" multiple>
+                </div>
+
+                <div class="files-container">
+                    <div class="files-header">
+                        <h2>My Files</h2>
+                        <div class="files-controls">
+                            <input type="text" id="searchInput" class="search-input" placeholder="Search files...">
+                            <select id="sortSelect" class="sort-select">
+                                <option value="name">Name</option>
+                                <option value="size">Size</option>
+                                <option value="date">Date</option>
+                            </select>
+                            <div class="view-toggle">
+                                <button class="view-btn active" data-view="list">☰</button>
+                                <button class="view-btn" data-view="grid">⊞</button>
+                            </div>
+                            <button id="refreshBtn" class="refresh-btn">↻</button>
+                        </div>
+                    </div>
+                    <div id="fileList" class="file-list"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js?v=12"></script>
+</body>
+
+</html>
