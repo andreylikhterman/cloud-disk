@@ -42,6 +42,9 @@ func main() {
 	mux.HandleFunc("/download/", auth.Middleware(handlers.Download))
 	mux.HandleFunc("/files", auth.Middleware(handlers.ListFiles))
 	mux.HandleFunc("/delete/", auth.Middleware(handlers.Delete))
+	mux.HandleFunc("/rename", auth.Middleware(handlers.Rename))
+	mux.HandleFunc("/share", auth.Middleware(handlers.ShareFile))
+	mux.HandleFunc("/s/", handlers.GetSharedFile)
 
 	handler := middleware.SecurityHeaders(limiter.Limit(mux))
 

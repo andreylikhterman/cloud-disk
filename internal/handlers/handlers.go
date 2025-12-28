@@ -402,3 +402,174 @@ func Delete(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 }
+
+func Rename(w http.ResponseWriter, r *http.Request) {
+	username := r.Header.Get("X-Username")
+	userIDStr := r.Header.Get("X-User-ID")
+	userID, _ := strconv.ParseInt(userIDStr, 10, 64)
+
+	if r.Method != http.MethodPost {
+		SendJSON(w, http.StatusMethodNotAllowed, models.Response{
+			Success: false,
+			Message: "Method not allowed",
+		})
+		return
+	}
+
+	var req models.RenameRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		SendJSON(w, http.StatusBadRequest, models.Response{
+			Success: false,
+			Message: "Invalid request body",
+		})
+		return
+	}
+
+	if req.OldName == "" || req.NewName == "" {
+		SendJSON(w, http.StatusBadRequest, models.Response{
+			Success: false,
+			Message: "Both old and new names are required",
+		})
+		return
+	}
+
+	result, err := db.DB.Exec(
+		"UPDATE files SET filename = $1 WHERE user_id = $2 AND filename = $3",
+		req.NewName, userID, req.OldName,
+	)
+	if err != nil {
+		SendJSON(w, http.StatusInternalServerError, models.Response{
+			Success: false,
+			Message: "Database error: " + err.Error(),
+		})
+		return
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		SendJSON(w, http.StatusNotFound, models.Response{
+			Success: false,
+			Message: "File not found",
+		})
+		return
+	}
+
+	log.Printf("File renamed by %s: %s -> %s\n", username, req.OldName, req.NewName)
+	SendJSON(w, http.StatusOK, models.Response{
+		Success: true,
+		Message: "File renamed successfully",
+		Data: map[string]string{
+			"oldName": req.OldName,
+			"newName": req.NewName,
+		},
+	})
+}
+
+func ShareFile(w http.ResponseWriter, r *http.Request) {
+	userIDStr := r.Header.Get("X-User-ID")
+	userID, _ := strconv.ParseInt(userIDStr, 10, 64)
+
+	if r.Method != http.MethodPost {
+		SendJSON(w, http.StatusMethodNotAllowed, models.Response{
+			Success: false,
+			Message: "Method not allowed",
+		})
+		return
+	}
+
+	var req models.ShareRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		SendJSON(w, http.StatusBadRequest, models.Response{
+			Success: false,
+			Message: "Invalid request body",
+		})
+		return
+	}
+
+	if req.Filename == "" {
+		SendJSON(w, http.StatusBadRequest, models.Response{
+			Success: false,
+			Message: "Filename is required",
+		})
+		return
+	}
+
+	var fileID int
+	err := db.DB.QueryRow("SELECT id FROM files WHERE user_id = $1 AND filename = $2", userID, req.Filename).Scan(&fileID)
+	if err == sql.ErrNoRows {
+		SendJSON(w, http.StatusNotFound, models.Response{
+			Success: false,
+			Message: "File not found",
+		})
+		return
+	} else if err != nil {
+		SendJSON(w, http.StatusInternalServerError, models.Response{
+			Success: false,
+			Message: "Database error: " + err.Error(),
+		})
+		return
+	}
+
+	var token string
+	err = db.DB.QueryRow("INSERT INTO shared_links (file_id) VALUES ($1) RETURNING token", fileID).Scan(&token)
+	if err != nil {
+		SendJSON(w, http.StatusInternalServerError, models.Response{
+			Success: false,
+			Message: "Failed to create share link: " + err.Error(),
+		})
+		return
+	}
+
+	SendJSON(w, http.StatusOK, models.Response{
+		Success: true,
+		Message: "Share link created",
+		Data: map[string]string{
+			"token": token,
+		},
+	})
+}
+
+func GetSharedFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	token := filepath.Base(r.URL.Path)
+	if token == "" || token == "s" {
+		http.NotFound(w, r)
+		return
+	}
+
+	var filename, storageName string
+	var size int64
+	err := db.DB.QueryRow(`
+		SELECT f.filename, f.path, f.size
+		FROM files f
+		JOIN shared_links s ON f.id = s.file_id
+		WHERE s.token = $1`,
+		token,
+	).Scan(&filename, &storageName, &size)
+
+	if err == sql.ErrNoRows {
+		http.NotFound(w, r)
+		return
+	} else if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	filePath := filepath.Join(config.UploadDir, storageName)
+	file, err := os.Open(filePath)
+	if err != nil {
+		http.Error(w, "File not found on disk", http.StatusNotFound)
+		return
+	}
+	defer file.Close()
+
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", size))
+
+	io.Copy(w, file)
+}

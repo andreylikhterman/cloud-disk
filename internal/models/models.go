@@ -56,3 +56,12 @@ type LoginResponse struct {
 	ExpiresAt time.Time `json:"expiresAt"`
 	Username  string    `json:"username"`
 }
+
+type RenameRequest struct {
+	OldName string `json:"oldName"`
+	NewName string `json:"newName"`
+}
+
+type ShareRequest struct {
+	Filename string `json:"filename"`
+}

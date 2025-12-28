@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/style.css?v=10">
+    <link rel="stylesheet" href="/static/css/style.css?v=25">
 </head>
 
 <body>
@@ -73,9 +73,41 @@
                 </div>
             </div>
         </div>
+
+        <!-- Rename Modal -->
+        <div id="renameModal" class="modal hidden">
+            <div class="modal-content card">
+                <h3>Rename File</h3>
+                <div class="form-group" style="margin-top: 20px;">
+                    <label for="newFilename">New Name</label>
+                    <input type="text" id="newFilename" required>
+                </div>
+                <div class="modal-actions">
+                    <button id="cancelRenameBtn" class="btn btn-secondary btn-sm">Cancel</button>
+                    <button id="confirmRenameBtn" class="btn btn-primary btn-sm">Rename</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Share Modal -->
+        <div id="shareModal" class="modal hidden">
+            <div class="modal-content card">
+                <h3>Share File</h3>
+                <p style="margin-top: 10px; color: var(--text-secondary); font-size: 0.9rem;">Copy the link below to
+                    share this file:</p>
+                <div class="form-group" style="margin-top: 15px;">
+                    <input type="text" id="shareLinkInput" readonly
+                        style="background: rgba(255,255,255,0.05); cursor: pointer; padding: 12px; font-family: monospace; font-size: 0.85rem; width: 100%; border: 1px solid var(--border-color); border-radius: var(--radius-sm); color: var(--text-primary);">
+                </div>
+                <div class="modal-actions">
+                    <button id="closeShareBtn" class="btn btn-secondary btn-sm">Close</button>
+                    <button id="copyShareBtn" class="btn btn-primary btn-sm">Copy Link</button>
+                </div>
+            </div>
+        </div>
     </div>
 
-    <script src="/static/js/app.js?v=12"></script>
+    <script src="/static/js/app.js?v=25"></script>
 </body>
 
 </html>
