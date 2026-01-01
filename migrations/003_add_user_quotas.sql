@@ -1,29 +1,3 @@
-CREATE TABLE IF NOT EXISTS users (
-    id SERIAL PRIMARY KEY,
-    username TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS files (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER REFERENCES users(id),
-    filename TEXT NOT NULL,
-    path TEXT NOT NULL,
-    size BIGINT NOT NULL,
-    hash_md5 TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(user_id, filename)
-);
-
-CREATE INDEX IF NOT EXISTS idx_files_hash_md5 ON files(hash_md5);
-
-CREATE TABLE IF NOT EXISTS shared_links (
-    token UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
 CREATE TABLE IF NOT EXISTS user_quotas (
     user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     storage_quota BIGINT NOT NULL DEFAULT 268435456,
@@ -46,5 +20,9 @@ CREATE TRIGGER trigger_create_user_quota
     AFTER INSERT ON users
     FOR EACH ROW
     EXECUTE FUNCTION create_user_quota();
+
+INSERT INTO user_quotas (user_id)
+SELECT id FROM users
+WHERE id NOT IN (SELECT user_id FROM user_quotas);
 
 CREATE INDEX IF NOT EXISTS idx_user_quotas_user_id ON user_quotas(user_id);

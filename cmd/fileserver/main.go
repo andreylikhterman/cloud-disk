@@ -13,6 +13,7 @@ import (
 	"fileserver/internal/db"
 	"fileserver/internal/handlers"
 	"fileserver/internal/middleware"
+	"fileserver/internal/sftpserver"
 	"fileserver/internal/tls"
 )
 
@@ -24,6 +25,18 @@ func main() {
 	if err := db.InitDB(config.DatabaseURL); err != nil {
 		log.Fatal("Failed to connect to database:", err)
 	}
+
+	cfg := config.NewConfig()
+	sftpSrv, err := sftpserver.NewServer(cfg)
+	if err != nil {
+		log.Fatal("Failed to create SFTP server:", err)
+	}
+	go func() {
+		log.Printf("SFTP server starting on port %s", cfg.SFTPPort)
+		if err := sftpSrv.Start(cfg.SFTPPort); err != nil {
+			log.Printf("SFTP server error: %v", err)
+		}
+	}()
 
 	limiter := middleware.NewRateLimiter(rate.Limit(5), 10)
 
@@ -44,6 +57,7 @@ func main() {
 	mux.HandleFunc("/delete/", auth.Middleware(handlers.Delete))
 	mux.HandleFunc("/rename", auth.Middleware(handlers.Rename))
 	mux.HandleFunc("/share", auth.Middleware(handlers.ShareFile))
+	mux.HandleFunc("/quota", auth.Middleware(handlers.GetQuota))
 	mux.HandleFunc("/s/", handlers.GetSharedFile)
 
 	handler := middleware.SecurityHeaders(limiter.Limit(mux))

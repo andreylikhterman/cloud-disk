@@ -134,6 +134,7 @@ function showApp() {
   document.getElementById("appSection").classList.remove("hidden");
   document.getElementById("currentUser").textContent = currentUsername;
   loadFiles();
+  loadQuota();
 }
 
 async function handleFiles(files) {
@@ -144,40 +145,148 @@ async function handleFiles(files) {
 }
 
 async function uploadFile(file) {
-  const formData = new FormData();
-  formData.append("file", file);
-
-  showAlert(`Uploading "${file.name}"...`, "info");
+  const maxSize = 256 * 1024 * 1024;
+  if (file.size > maxSize) {
+    showAlert("✗ File is too large (max 256 MB)", "error");
+    return;
+  }
 
   try {
-    const res = await fetch(`${API_BASE}/upload`, {
-      method: "POST",
+    const quotaRes = await fetch(`${API_BASE}/quota`, {
       headers: { Authorization: `Bearer ${authToken}` },
-      body: formData,
     });
 
-    if (res.status === 401) {
-      logout();
-      return;
-    }
-
-    const contentType = res.headers.get("content-type");
-    if (contentType && contentType.indexOf("application/json") !== -1) {
-      const data = await res.json();
-      if (data.success) {
-        showAlert(`✓ "${file.name}" uploaded successfully`, "success");
-        loadFiles();
-      } else {
-        showAlert(data.message, "error");
+    if (quotaRes.ok) {
+      const quotaData = await quotaRes.json();
+      if (quotaData.success && quotaData.data && quotaData.data.storage) {
+        const available = quotaData.data.storage.quota - quotaData.data.storage.used;
+        if (file.size > available) {
+          showAlert("✗ Quota exceeded. Please delete some files first.", "error");
+          loadQuota();
+          return;
+        }
       }
-    } else {
-      const text = await res.text();
-      throw new Error(text || `Server returned ${res.status}`);
     }
   } catch (e) {
-    console.error("Upload error:", e);
-    showAlert(`✗ Failed to upload "${file.name}": ${e.message}`, "error");
+    console.error("Failed to check quota:", e);
   }
+
+  const md5Hash = await calculateMD5(file);
+
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("md5", md5Hash);
+
+  const progressEl = document.getElementById("uploadProgress");
+  const fileNameEl = document.getElementById("uploadFileName");
+  const percentEl = document.getElementById("uploadPercent");
+  const progressBar = document.getElementById("uploadProgressBar");
+
+  fileNameEl.textContent = file.name;
+  percentEl.textContent = "0%";
+  progressBar.style.width = "0%";
+  progressEl.classList.remove("hidden");
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) {
+        const percent = Math.round((e.loaded / e.total) * 100);
+        percentEl.textContent = `${percent}%`;
+        progressBar.style.width = `${percent}%`;
+      }
+    };
+
+    xhr.onload = () => {
+      progressEl.classList.add("hidden");
+
+      if (xhr.status === 401) {
+        logout();
+        resolve();
+        return;
+      }
+
+      if (xhr.status === 413 || xhr.status === 400) {
+        showAlert("✗ File is too large (max 256 MB)", "error");
+        resolve();
+        return;
+      }
+
+      if (xhr.status === 403) {
+        showAlert("✗ Quota exceeded. Please delete some files first.", "error");
+        loadQuota();
+        resolve();
+        return;
+      }
+
+      try {
+        const contentType = xhr.getResponseHeader("content-type");
+        if (contentType && contentType.indexOf("application/json") !== -1) {
+          const data = JSON.parse(xhr.responseText);
+          if (data.success) {
+            showAlert("✓ File uploaded successfully", "success");
+            loadFiles();
+            loadQuota();
+          } else {
+            showAlert(`✗ ${data.message}`, "error");
+          }
+        } else {
+          if (xhr.responseText.includes("413 Request Entity Too Large")) {
+            showAlert("✗ File is too large (max 256 MB)", "error");
+          } else {
+            showAlert(`✗ Upload failed: ${xhr.status} ${xhr.statusText}`, "error");
+          }
+        }
+      } catch (e) {
+        showAlert(`✗ Upload failed: ${xhr.status}`, "error");
+      }
+      resolve();
+    };
+
+    xhr.onerror = () => {
+      progressEl.classList.add("hidden");
+      showAlert("✗ Upload failed: Network error", "error");
+      resolve();
+    };
+
+    xhr.open("POST", `${API_BASE}/upload`);
+    xhr.setRequestHeader("Authorization", `Bearer ${authToken}`);
+    xhr.send(formData);
+  });
+}
+
+function calculateMD5(file) {
+  return new Promise((resolve, reject) => {
+    const chunkSize = 2097152;
+    const chunks = Math.ceil(file.size / chunkSize);
+    let currentChunk = 0;
+    const spark = new SparkMD5.ArrayBuffer();
+    const fileReader = new FileReader();
+
+    fileReader.onload = function (e) {
+      spark.append(e.target.result);
+      currentChunk++;
+
+      if (currentChunk < chunks) {
+        loadNext();
+      } else {
+        resolve(spark.end());
+      }
+    };
+
+    fileReader.onerror = function () {
+      reject(new Error("Failed to read file for MD5 calculation"));
+    };
+
+    function loadNext() {
+      const start = currentChunk * chunkSize;
+      const end = Math.min(start + chunkSize, file.size);
+      fileReader.readAsArrayBuffer(file.slice(start, end));
+    }
+
+    loadNext();
+  });
 }
 
 let allFiles = [];
@@ -273,6 +382,7 @@ async function deleteFile(filename) {
 
     if (data.success) {
       loadFiles();
+      loadQuota();
     } else {
       showAlert(data.message, "error");
     }
@@ -293,7 +403,23 @@ async function downloadFile(filename) {
     );
 
     if (res.ok) {
+      const serverMD5 = res.headers.get("Content-MD5");
       const blob = await res.blob();
+
+      if (serverMD5) {
+        const file = new File([blob], filename);
+        const clientMD5 = await calculateMD5(file);
+
+        if (clientMD5 !== serverMD5) {
+          showAlert("✗ File integrity check failed: MD5 mismatch", "error");
+          console.error(
+            `MD5 mismatch: server=${serverMD5}, client=${clientMD5}`,
+          );
+          return;
+        }
+        console.log(`MD5 verified: ${clientMD5}`);
+      }
+
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -355,13 +481,17 @@ function formatSize(bytes) {
 }
 
 function showAlert(msg, type) {
-  if (type !== "error") return;
   const container = document.getElementById("alertContainer");
+
+  while (container.firstChild) {
+    container.removeChild(container.firstChild);
+  }
+
   const alert = document.createElement("div");
   alert.className = `alert alert-${type}`;
   alert.textContent = msg;
   container.appendChild(alert);
-  setTimeout(() => alert.remove(), 2000);
+  setTimeout(() => alert.remove(), type === "info" ? 3000 : 5000);
 }
 
 let renameFilename = "";

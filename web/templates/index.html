@@ -45,11 +45,34 @@
                     <button id="logoutBtn" class="btn btn-secondary">Sign Out</button>
                 </div>
 
+                <div class="quota-display" id="quotaDisplay" style="display:none; margin: 20px 0; padding: 15px; background: rgba(255,255,255,0.03); border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <span style="font-size: 0.9rem; color: var(--text-secondary);">Storage Usage</span>
+                        <span id="quotaText" style="font-size: 0.9rem; font-weight: 500;"></span>
+                    </div>
+                    <div style="width: 100%; height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden;">
+                        <div id="quotaBar" style="height: 100%; background: linear-gradient(90deg, #4CAF50, #45a049); transition: width 0.3s ease, background 0.3s ease; width: 0%;"></div>
+                    </div>
+                    <div style="margin-top: 8px; font-size: 0.8rem; color: var(--text-secondary);">
+                        <span id="quotaDetails"></span>
+                    </div>
+                </div>
+
                 <div class="upload-zone" id="uploadZone">
                     <div class="upload-icon">↓</div>
                     <h3>Drop files here</h3>
                     <p style="color: var(--text-secondary); font-size: 0.9rem;">or click to browse</p>
                     <input type="file" id="fileInput" class="hidden" multiple>
+                </div>
+
+                <div id="uploadProgress" class="upload-progress hidden">
+                    <div class="progress-info">
+                        <span id="uploadFileName"></span>
+                        <span id="uploadPercent">0%</span>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div id="uploadProgressBar" class="progress-bar"></div>
+                    </div>
                 </div>
 
                 <div class="files-container">
@@ -107,7 +130,9 @@
         </div>
     </div>
 
-    <script src="/static/js/app.js?v=25"></script>
+    <script src="/static/js/spark-md5.min.js"></script>
+    <script src="/static/js/quota.js?v=1"></script>
+    <script src="/static/js/app.js?v=27"></script>
 </body>
 
 </html>

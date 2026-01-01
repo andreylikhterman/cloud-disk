@@ -1,0 +1,38 @@
+# Environment variables (contains secrets!)
+.env
+
+# Uploads directory
+uploads/
+
+# TLS certificates
+cert.pem
+key.pem
+sftp_host_key
+sftp_keys/
+
+# Database
+postgres_data/
+
+# Certbot
+certbot/
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

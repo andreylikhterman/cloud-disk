@@ -32,6 +32,7 @@ type File struct {
 	Filename  string    `json:"filename"`
 	Path      string    `json:"path"`
 	Size      int64     `json:"size"`
+	HashMD5   string    `json:"hashMd5,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 }
 
@@ -64,4 +65,33 @@ type RenameRequest struct {
 
 type ShareRequest struct {
 	Filename string `json:"filename"`
+}
+
+type UserQuota struct {
+	UserID         int64     `json:"userId"`
+	StorageQuota   int64     `json:"storageQuota"`
+	StorageUsed    int64     `json:"storageUsed"`
+	FileCountQuota int       `json:"fileCountQuota"`
+	FileCountUsed  int       `json:"fileCountUsed"`
+	MaxFileSize    int64     `json:"maxFileSize"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+}
+
+type QuotaResponse struct {
+	Storage struct {
+		Used            int64   `json:"used"`
+		Quota           int64   `json:"quota"`
+		UsedPercent     float64 `json:"usedPercent"`
+		Available       int64   `json:"available"`
+		UsedFormatted   string  `json:"usedFormatted"`
+		QuotaFormatted  string  `json:"quotaFormatted"`
+	} `json:"storage"`
+	FileCount struct {
+		Used        int     `json:"used"`
+		Quota       int     `json:"quota"`
+		UsedPercent float64 `json:"usedPercent"`
+		Available   int     `json:"available"`
+	} `json:"fileCount"`
+	MaxFileSize          int64  `json:"maxFileSize"`
+	MaxFileSizeFormatted string `json:"maxFileSizeFormatted"`
 }

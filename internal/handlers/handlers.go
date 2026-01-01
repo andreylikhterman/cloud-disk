@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"crypto/md5"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"fileserver/internal/auth"
@@ -152,8 +155,29 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	contentLength := r.ContentLength
+	if contentLength > 0 {
+		hasQuota, err := db.CheckQuota(int(userID), contentLength)
+		if err != nil {
+			log.Printf("Quota check failed for user %d: %v", userID, err)
+			SendJSON(w, http.StatusInternalServerError, models.Response{
+				Success: false,
+				Message: "Failed to check quota",
+			})
+			return
+		}
+		if !hasQuota {
+			SendJSON(w, http.StatusForbidden, models.Response{
+				Success: false,
+				Message: "Quota exceeded",
+			})
+			return
+		}
+	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, config.MaxUploadSize)
 	if err := r.ParseMultipartForm(config.MaxUploadSize); err != nil {
+		log.Printf("Failed to parse multipart form: %v", err)
 		SendJSON(w, http.StatusBadRequest, models.Response{
 			Success: false,
 			Message: "File too large or bad request",
@@ -163,6 +187,7 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
+		log.Printf("Failed to get form file: %v", err)
 		SendJSON(w, http.StatusBadRequest, models.Response{
 			Success: false,
 			Message: "Failed to read file: " + err.Error(),
@@ -171,8 +196,26 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
+	hasQuota, err := db.CheckQuota(int(userID), header.Size)
+	if err != nil {
+		log.Printf("Quota check failed for user %d: %v", userID, err)
+		SendJSON(w, http.StatusInternalServerError, models.Response{
+			Success: false,
+			Message: "Failed to check quota: " + err.Error(),
+		})
+		return
+	}
+	if !hasQuota {
+		SendJSON(w, http.StatusForbidden, models.Response{
+			Success: false,
+			Message: "Quota exceeded: insufficient storage space or file count limit reached",
+		})
+		return
+	}
+
 	buff := make([]byte, 512)
 	if _, err := file.Read(buff); err != nil {
+		log.Printf("Failed to read file content: %v", err)
 		SendJSON(w, http.StatusInternalServerError, models.Response{
 			Success: false,
 			Message: "Failed to read file content",
@@ -181,6 +224,7 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := file.Seek(0, 0); err != nil {
+		log.Printf("Failed to seek file: %v", err)
 		SendJSON(w, http.StatusInternalServerError, models.Response{
 			Success: false,
 			Message: "Failed to reset file pointer",
@@ -190,18 +234,47 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 
 	fileType := http.DetectContentType(buff)
 	allowedTypes := map[string]bool{
-		"image/jpeg":                true,
-		"image/png":                 true,
-		"image/gif":                 true,
-		"application/pdf":           true,
-		"text/plain; charset=utf-8": true,
-		"application/zip":           true,
-		"application/octet-stream":  true,
+		"image/jpeg":                                                        true,
+		"image/png":                                                         true,
+		"image/gif":                                                         true,
+		"image/webp":                                                        true,
+		"image/svg+xml":                                                     true,
+		"application/pdf":                                                   true,
+		"text/plain; charset=utf-8":                                         true,
+		"application/zip":                                                   true,
+		"application/x-rar-compressed":                                      true,
+		"application/x-7z-compressed":                                       true,
+		"application/gzip":                                                  true,
+		"application/vnd.openxmlformats-officedocument.wordprocessingml.document":   true,
+		"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":         true,
+		"application/vnd.openxmlformats-officedocument.presentationml.presentation": true,
+		"application/msword":                                                true,
+		"application/vnd.ms-excel":                                          true,
+		"application/vnd.ms-powerpoint":                                     true,
+		"video/mp4":                                                         true,
+		"video/webm":                                                        true,
+		"video/mpeg":                                                        true,
+		"video/quicktime":                                                   true,
+		"video/x-msvideo":                                                   true,
+		"audio/mpeg":                                                        true,
+		"audio/wav":                                                         true,
+		"audio/ogg":                                                         true,
+		"audio/webm":                                                        true,
+		"application/json":                                                  true,
+		"text/csv":                                                          true,
+		"application/octet-stream":                                          true,
 	}
 
 	if !allowedTypes[fileType] {
-		log.Printf("Blocked upload of type %s by %s\n", fileType, username)
+		log.Printf("Blocked upload of type %s by user %s (file: %s)", fileType, username, header.Filename)
+		SendJSON(w, http.StatusUnsupportedMediaType, models.Response{
+			Success: false,
+			Message: "File type not allowed",
+		})
+		return
 	}
+
+	clientMD5 := r.FormValue("md5")
 
 	ext := filepath.Ext(header.Filename)
 	storageName := fmt.Sprintf("%d_%d%s", userID, time.Now().UnixNano(), ext)
@@ -217,7 +290,11 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer dst.Close()
 
-	if _, err := io.Copy(dst, file); err != nil {
+	hasher := md5.New()
+	writer := io.MultiWriter(dst, hasher)
+
+	if _, err := io.Copy(writer, file); err != nil {
+		os.Remove(storagePath)
 		SendJSON(w, http.StatusInternalServerError, models.Response{
 			Success: false,
 			Message: "Failed to save file: " + err.Error(),
@@ -225,20 +302,41 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = db.DB.Exec(
-		"INSERT INTO files (user_id, filename, path, size) VALUES ($1, $2, $3, $4)",
-		userID, header.Filename, storageName, header.Size,
-	)
-	if err != nil {
+	serverMD5 := hex.EncodeToString(hasher.Sum(nil))
+
+	if clientMD5 != "" && clientMD5 != serverMD5 {
 		os.Remove(storagePath)
-		SendJSON(w, http.StatusInternalServerError, models.Response{
+		log.Printf("MD5 mismatch for %s: client=%s, server=%s", header.Filename, clientMD5, serverMD5)
+		SendJSON(w, http.StatusBadRequest, models.Response{
 			Success: false,
-			Message: "Failed to save file metadata: " + err.Error(),
+			Message: "File integrity check failed: MD5 hash mismatch",
 		})
 		return
 	}
 
-	log.Printf("File uploaded by %s: %s (%d bytes)\n", username, header.Filename, header.Size)
+	_, err = db.DB.Exec(
+		"INSERT INTO files (user_id, filename, path, size, hash_md5) VALUES ($1, $2, $3, $4, $5)",
+		userID, header.Filename, storageName, header.Size, serverMD5,
+	)
+	if err != nil {
+		os.Remove(storagePath)
+		if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "UNIQUE constraint") {
+			SendJSON(w, http.StatusConflict, models.Response{
+				Success: false,
+				Message: "File with this name already exists",
+			})
+		} else {
+			SendJSON(w, http.StatusInternalServerError, models.Response{
+				Success: false,
+				Message: "Failed to save file metadata: " + err.Error(),
+			})
+		}
+		return
+	}
+
+	if err := db.UpdateQuotaUsage(int(userID), header.Size, 1); err != nil {
+		log.Printf("Warning: failed to update quota for user %d: %v", userID, err)
+	}
 	SendJSON(w, http.StatusOK, models.Response{
 		Success: true,
 		Message: "File uploaded successfully",
@@ -246,12 +344,13 @@ func Upload(w http.ResponseWriter, r *http.Request) {
 			"filename": header.Filename,
 			"size":     header.Size,
 			"user":     username,
+			"md5":      serverMD5,
 		},
 	})
 }
 
 func Download(w http.ResponseWriter, r *http.Request) {
-	username := r.Header.Get("X-Username")
+	_ = r.Header.Get("X-Username")
 	userIDStr := r.Header.Get("X-User-ID")
 	userID, _ := strconv.ParseInt(userIDStr, 10, 64)
 
@@ -274,10 +373,11 @@ func Download(w http.ResponseWriter, r *http.Request) {
 
 	var storageName string
 	var size int64
+	var hashMD5 sql.NullString
 	err := db.DB.QueryRow(
-		"SELECT path, size FROM files WHERE user_id = $1 AND filename = $2",
+		"SELECT path, size, hash_md5 FROM files WHERE user_id = $1 AND filename = $2",
 		userID, filename,
-	).Scan(&storageName, &size)
+	).Scan(&storageName, &size, &hashMD5)
 
 	if err == sql.ErrNoRows {
 		SendJSON(w, http.StatusNotFound, models.Response{
@@ -299,12 +399,15 @@ func Download(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", size))
 
+	if hashMD5.Valid && hashMD5.String != "" {
+		w.Header().Set("Content-MD5", hashMD5.String)
+	}
+
 	http.ServeFile(w, r, filePath)
-	log.Printf("File downloaded by %s: %s (%d bytes)\n", username, filename, size)
 }
 
 func ListFiles(w http.ResponseWriter, r *http.Request) {
-	username := r.Header.Get("X-Username")
+	_ = r.Header.Get("X-Username")
 	userIDStr := r.Header.Get("X-User-ID")
 	userID, _ := strconv.ParseInt(userIDStr, 10, 64)
 
@@ -336,7 +439,6 @@ func ListFiles(w http.ResponseWriter, r *http.Request) {
 		files = append(files, f)
 	}
 
-	log.Printf("Files listed by %s: %d files\n", username, len(files))
 	SendJSON(w, http.StatusOK, models.Response{
 		Success: true,
 		Message: fmt.Sprintf("Found %d files", len(files)),
@@ -367,10 +469,11 @@ func Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var storageName string
+	var fileSize int64
 	err := db.DB.QueryRow(
-		"SELECT path FROM files WHERE user_id = $1 AND filename = $2",
+		"SELECT path, size FROM files WHERE user_id = $1 AND filename = $2",
 		userID, filename,
-	).Scan(&storageName)
+	).Scan(&storageName, &fileSize)
 
 	if err == sql.ErrNoRows {
 		SendJSON(w, http.StatusNotFound, models.Response{
@@ -378,6 +481,11 @@ func Delete(w http.ResponseWriter, r *http.Request) {
 			Message: "File not found",
 		})
 		return
+	}
+
+	filePath := filepath.Join(config.UploadDir, storageName)
+	if err := os.Remove(filePath); err != nil {
+		log.Printf("Failed to delete physical file %s: %v", filePath, err)
 	}
 
 	_, err = db.DB.Exec("DELETE FROM files WHERE user_id = $1 AND filename = $2", userID, filename)
@@ -389,10 +497,10 @@ func Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filePath := filepath.Join(config.UploadDir, storageName)
-	os.Remove(filePath)
+	if err := db.UpdateQuotaUsage(int(userID), -fileSize, -1); err != nil {
+		log.Printf("Warning: failed to update quota for user %d: %v", userID, err)
+	}
 
-	log.Printf("File deleted by %s: %s\n", username, filename)
 	SendJSON(w, http.StatusOK, models.Response{
 		Success: true,
 		Message: "File deleted successfully",
@@ -404,7 +512,7 @@ func Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func Rename(w http.ResponseWriter, r *http.Request) {
-	username := r.Header.Get("X-Username")
+	_ = r.Header.Get("X-Username")
 	userIDStr := r.Header.Get("X-User-ID")
 	userID, _ := strconv.ParseInt(userIDStr, 10, 64)
 
@@ -454,7 +562,6 @@ func Rename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("File renamed by %s: %s -> %s\n", username, req.OldName, req.NewName)
 	SendJSON(w, http.StatusOK, models.Response{
 		Success: true,
 		Message: "File renamed successfully",
@@ -572,4 +679,66 @@ func GetSharedFile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", size))
 
 	io.Copy(w, file)
+}
+
+func GetQuota(w http.ResponseWriter, r *http.Request) {
+	userIDStr := r.Header.Get("X-User-ID")
+	userID, _ := strconv.ParseInt(userIDStr, 10, 64)
+
+	if r.Method != http.MethodGet {
+		SendJSON(w, http.StatusMethodNotAllowed, models.Response{
+			Success: false,
+			Message: "Method not allowed",
+		})
+		return
+	}
+
+	quota, err := db.GetUserQuota(int(userID))
+	if err != nil {
+		SendJSON(w, http.StatusInternalServerError, models.Response{
+			Success: false,
+			Message: "Failed to get quota: " + err.Error(),
+		})
+		return
+	}
+
+	var response models.QuotaResponse
+
+	response.Storage.Used = quota.StorageUsed
+	response.Storage.Quota = quota.StorageQuota
+	response.Storage.Available = quota.StorageQuota - quota.StorageUsed
+	if quota.StorageQuota > 0 {
+		response.Storage.UsedPercent = float64(quota.StorageUsed) / float64(quota.StorageQuota) * 100
+	}
+	response.Storage.UsedFormatted = formatBytes(quota.StorageUsed)
+	response.Storage.QuotaFormatted = formatBytes(quota.StorageQuota)
+
+	response.FileCount.Used = quota.FileCountUsed
+	response.FileCount.Quota = quota.FileCountQuota
+	response.FileCount.Available = quota.FileCountQuota - quota.FileCountUsed
+	if quota.FileCountQuota > 0 {
+		response.FileCount.UsedPercent = float64(quota.FileCountUsed) / float64(quota.FileCountQuota) * 100
+	}
+
+	response.MaxFileSize = quota.MaxFileSize
+	response.MaxFileSizeFormatted = formatBytes(quota.MaxFileSize)
+
+	SendJSON(w, http.StatusOK, models.Response{
+		Success: true,
+		Message: "Quota retrieved successfully",
+		Data:    response,
+	})
+}
+
+func formatBytes(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }

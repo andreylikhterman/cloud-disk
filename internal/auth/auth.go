@@ -3,7 +3,6 @@ package auth
 import (
 	"database/sql"
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -131,7 +130,6 @@ func RegisterUser(username, password string) (*models.User, error) {
 		return nil, err
 	}
 
-	log.Printf("New user registered: %s (ID: %d)\n", username, user.ID)
 	return user, nil
 }
 
@@ -150,6 +148,11 @@ func AuthenticateUser(username, password string) (*models.User, error) {
 		return nil, fmt.Errorf("invalid credentials")
 	}
 
-	log.Printf("User logged in: %s (ID: %d)\n", username, user.ID)
 	return user, nil
+}
+
+// CheckPasswordHash compares a password with a hash
+func CheckPasswordHash(password, hash string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+	return err == nil
 }

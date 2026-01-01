@@ -6,13 +6,14 @@ services:
     environment:
       - DATABASE_URL=postgres://fileserver:${PG_PASSWORD}@db:5432/fileserver?sslmode=disable
       - JWT_SECRET=${JWT_SECRET}
+    ports:
+      - "2222:2222"
     depends_on:
       db:
         condition: service_healthy
     volumes:
       - ./uploads:/app/uploads
-      - ./cert.pem:/app/cert.pem
-      - ./key.pem:/app/key.pem
+      - sftp_host_key:/app/sftp_keys
 
   nginx:
     image: nginx:1.25-alpine
@@ -51,3 +52,4 @@ services:
 
 volumes:
   postgres_data:
+  sftp_host_key:

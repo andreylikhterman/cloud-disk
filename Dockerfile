@@ -22,7 +22,7 @@ COPY --from=builder /app/fileserver .
 
 COPY web ./web
 
-RUN mkdir -p uploads && \
+RUN mkdir -p uploads sftp_keys && \
     adduser -D -H -h /app appuser && \
     chown -R appuser:appuser /app
 
